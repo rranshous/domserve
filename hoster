@@ -1,0 +1,91 @@
+#!/usr/bin/env ruby
+
+require 'socket'
+require 'base64'
+require 'time'
+
+SITESROOT = ENV['SITESROOT'] || '.'
+PORT = (ENV['PORT'] || '8087').to_i
+
+def load_encoded_image(image_path)
+  return base64(read_binary(image_path))
+end
+
+def base64(bin_data)
+  return nil unless bin_data
+  return Base64.encode64(bin_data)
+end
+
+def read_binary(path)
+  STDERR.puts("reading file at: #{path}")
+  return nil unless path
+  File.open(path, 'rb') do |fh|
+    data = fh.read()
+    STDERR.puts("read data: #{data.length}")
+    return data
+  end
+end
+
+def random_image(dir)
+  path = "#{SITESROOT}/#{dir}/*"
+  STDERR.puts("finding image in: #{path}")
+  paths = Dir[path]
+  STDERR.puts("paths: #{paths}")
+  path = paths.sample
+  STDERR.puts("image path: #{path}")
+  return path
+end
+
+default_image = load_encoded_image('./tinysad.jpg')
+
+STDERR.puts "listening on #{PORT}"
+socket = TCPServer.new(PORT)
+
+loop do
+  client = socket.accept
+  start_time = Time.now.to_f
+  line = client.gets
+  STDERR.puts("first line: #{line}")
+  method, path = line.split(' ')
+  STDERR.puts("method: #{method}; path: #{path}")
+  headers = { 'Host' => nil }
+  loop do
+    line = client.gets
+    STDERR.puts("header line: #{line}")
+    header, value = line.split(':').map(&:strip).compact
+    STDERR.puts("header: #{header}; value: #{value}")
+    if headers.has_key?(header)
+      STDERR.puts("desired header: #{header}")
+      headers[header] = value
+      if headers.keys.length == headers.values.compact.length
+        STDERR.puts("found all headers")
+        break
+      end
+    end
+  end
+
+  image_data = load_encoded_image(random_image(headers['Host'])) || default_image
+
+  client.puts("HTTP/1.1 200 OK")
+  client.puts("Server: domserve")
+  client.puts("Conent-Type: text/html")
+  client.puts
+  client.puts("""
+<html>
+  <head>
+    <title>#{headers['Host']}</title>
+    <style>
+      body { background-color: black; }
+      img { width: 100%; }
+      </style></head>
+    <body>
+    <img src='data:image/jpg;base64,#{image_data}'/>
+  </body>
+</html>
+""")
+  client.flush
+  client.close
+  STDERR.puts "request time: #{Time.now.to_f - start_time}"
+  STDERR.puts "done req cycle"
+  STDERR.flush
+end
